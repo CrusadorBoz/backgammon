@@ -113,6 +113,29 @@ func evalPos(p pos, pl int) float64 {
 	return s
 }
 
+// bestDouble picks which doubles (1-6) the computer plays for its Acey Deucey
+// bonus, by trying each value and scoring the best position it can reach. Easy
+// just picks a random value so the computer stays beatable.
+func bestDouble(g *Game, rng *rand.Rand) int {
+	if g.Level == "easy" {
+		return rng.Intn(6) + 1
+	}
+	best, bestScore := 6, -1e18
+	for d := 1; d <= 6; d++ {
+		seqs := enumerate(g.pos, g.Turn, []int{d, d, d, d})
+		sc := evalPos(g.pos, g.Turn) // fallback: this double is unplayable
+		for _, s := range seqs {
+			if e := evalPos(s.end, g.Turn); e > sc {
+				sc = e
+			}
+		}
+		if sc > bestScore {
+			bestScore, best = sc, d
+		}
+	}
+	return best
+}
+
 // bestPlay chooses the moves the computer will make for its turn. allowedFirst
 // is the set of moves the rules actually permit as the turn's first move (from
 // Game.legalNow) — it carries the "must play the higher die" restriction that

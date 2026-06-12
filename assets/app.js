@@ -9,8 +9,6 @@ const barRight = barLeft + BW;       // 430
 const offLeft = M + 12 * PW + BW;    // 790
 const midY = CH / 2;
 
-const POINT_LIGHT = "#caa46a";
-const POINT_DARK = "#8a5a34";
 const WHITE_FILL = "#f1ead4", WHITE_EDGE = "#b3a877";
 const BLACK_FILL = "#2a2a33", BLACK_EDGE = "#6c6c82";
 
@@ -21,6 +19,184 @@ let state = null;       // latest server state
 let selected = null;    // currently selected source: point index, or -1 for bar
 let busy = false;       // a request is in flight
 let aiTimer = null;     // pending computer-turn timer
+let currentVariant = "backgammon"; // "backgammon" or "acey" (Acey Deucey)
+
+// =====================================================================
+// Sound effects — synthesized with Web Audio (no audio files to ship).
+// =====================================================================
+let audioCtx = null;
+let soundOn = localStorage.getItem("bg_sound") !== "off";
+
+function ensureAudio() {
+  if (!soundOn) return null;
+  if (!audioCtx) {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return null;
+    try { audioCtx = new AC(); } catch (e) { return null; }
+  }
+  if (audioCtx.state === "suspended") audioCtx.resume();
+  return audioCtx;
+}
+
+function tone(freq, dur, type, gain, when) {
+  const ac = ensureAudio(); if (!ac) return;
+  const t0 = ac.currentTime + (when || 0);
+  const osc = ac.createOscillator();
+  const g = ac.createGain();
+  osc.type = type || "triangle";
+  osc.frequency.setValueAtTime(freq, t0);
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(gain || 0.08, t0 + 0.008);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  osc.connect(g); g.connect(ac.destination);
+  osc.start(t0); osc.stop(t0 + dur + 0.02);
+}
+
+function noiseBurst(dur, gain, when) {
+  const ac = ensureAudio(); if (!ac) return;
+  const t0 = ac.currentTime + (when || 0);
+  const n = Math.max(1, Math.floor(ac.sampleRate * dur));
+  const buf = ac.createBuffer(1, n, ac.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / n);
+  const src = ac.createBufferSource(); src.buffer = buf;
+  const bp = ac.createBiquadFilter(); bp.type = "bandpass"; bp.frequency.value = 1800; bp.Q.value = 0.7;
+  const g = ac.createGain(); g.gain.value = gain || 0.12;
+  src.connect(bp); bp.connect(g); g.connect(ac.destination);
+  src.start(t0);
+}
+
+const sfx = {
+  roll() { noiseBurst(0.13, 0.16); noiseBurst(0.12, 0.13, 0.09); noiseBurst(0.10, 0.10, 0.18); },
+  move() { tone(300, 0.07, "triangle", 0.10); tone(180, 0.06, "sine", 0.05, 0.005); },
+  hit() { tone(150, 0.16, "sawtooth", 0.10); noiseBurst(0.10, 0.10); },
+  bearOff() { tone(540, 0.10, "triangle", 0.09); tone(810, 0.14, "triangle", 0.09, 0.08); },
+  win() {
+    // Rising fanfare (C-E-G-C), then a held major chord with a sparkle on top
+    // and a soft shimmer swell — a fuller celebration than a plain arpeggio.
+    const run = [523.25, 659.25, 783.99, 1046.5];
+    run.forEach((f, i) => tone(f, 0.22, "triangle", 0.11, i * 0.10));
+    const top = run.length * 0.10;
+    run.forEach((f) => tone(f, 0.95, "triangle", 0.06, top));        // sustained chord
+    [1318.5, 1567.98, 2093.0].forEach((f, i) => tone(f, 0.2, "sine", 0.05, top + 0.14 + i * 0.07)); // sparkle
+    noiseBurst(0.55, 0.05, top);                                      // shimmer swell
+  },
+  select() { tone(420, 0.04, "sine", 0.045); },
+};
+
+// =====================================================================
+// Win celebration — confetti burst over the board (transparent overlay).
+// =====================================================================
+const confettiCanvas = document.getElementById("confetti");
+const confettiCtx = confettiCanvas.getContext("2d");
+let confettiParticles = [];
+let confettiRAF = null;
+const CONFETTI_COLORS = ["#ffd166", "#ef476f", "#06d6a0", "#118ab2", "#f78c6b", "#c77dff", "#ffffff"];
+
+// Fire a burst of paper from the two lower corners, like cannons.
+function spawnConfetti(n) {
+  for (let i = 0; i < n; i++) {
+    const fromLeft = Math.random() < 0.5;
+    confettiParticles.push({
+      x: fromLeft ? CW * 0.1 : CW * 0.9,
+      y: CH * 0.95,
+      vx: (fromLeft ? 1 : -1) * (2.5 + Math.random() * 4.5),
+      vy: -(8 + Math.random() * 6),
+      g: 0.16 + Math.random() * 0.07,
+      size: 5 + Math.random() * 6,
+      rot: Math.random() * Math.PI,
+      vrot: (Math.random() * 2 - 1) * 0.32,
+      color: CONFETTI_COLORS[(Math.random() * CONFETTI_COLORS.length) | 0],
+      rect: Math.random() < 0.55,
+    });
+  }
+}
+
+function launchConfetti() {
+  spawnConfetti(110);
+  setTimeout(() => spawnConfetti(80), 260);
+  setTimeout(() => spawnConfetti(60), 560);
+  if (!confettiRAF) confettiRAF = requestAnimationFrame(stepConfetti);
+}
+
+function stepConfetti() {
+  confettiCtx.clearRect(0, 0, CW, CH);
+  let alive = 0;
+  for (const p of confettiParticles) {
+    p.vy += p.g;
+    p.vx *= 0.992;
+    p.x += p.vx;
+    p.y += p.vy;
+    p.rot += p.vrot;
+    if (p.y > CH + 24) continue; // fell off the bottom
+    alive++;
+    confettiCtx.save();
+    confettiCtx.translate(p.x, p.y);
+    confettiCtx.rotate(p.rot);
+    confettiCtx.fillStyle = p.color;
+    if (p.rect) confettiCtx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size * 0.6);
+    else { confettiCtx.beginPath(); confettiCtx.arc(0, 0, p.size / 2, 0, Math.PI * 2); confettiCtx.fill(); }
+    confettiCtx.restore();
+  }
+  if (alive > 0) {
+    confettiRAF = requestAnimationFrame(stepConfetti);
+  } else {
+    confettiParticles = [];
+    confettiCtx.clearRect(0, 0, CW, CH);
+    confettiRAF = null;
+  }
+}
+
+// =====================================================================
+// Match score — points (single 1 / gammon 2 / backgammon 3), persisted.
+// =====================================================================
+let scoreW = parseInt(localStorage.getItem("bg_scoreW") || "0", 10) || 0;
+let scoreB = parseInt(localStorage.getItem("bg_scoreB") || "0", 10) || 0;
+
+function pointsFor(result) {
+  if (!result) return 1;
+  if (/backgammon/i.test(result)) return 3;
+  if (/gammon/i.test(result)) return 2;
+  return 1;
+}
+function renderScore() {
+  const w = document.getElementById("scoreW");
+  const b = document.getElementById("scoreB");
+  if (w) w.textContent = scoreW;
+  if (b) b.textContent = scoreB;
+}
+
+// React to a state change with sound + scoring. `prev` is null on first load.
+function reactToTransition(prev, cur) {
+  if (!cur) return;
+  if (cur.over && prev && !prev.over) {
+    if (cur.winner > 0) scoreW += pointsFor(cur.result);
+    else scoreB += pointsFor(cur.result);
+    localStorage.setItem("bg_scoreW", String(scoreW));
+    localStorage.setItem("bg_scoreB", String(scoreB));
+    renderScore();
+    sfx.win();
+    launchConfetti();
+    return;
+  }
+  if (!prev) { renderScore(); return; } // initial load: paint score, stay silent
+
+  if (cur.rolled && !prev.rolled) sfx.roll();
+
+  const prevOff = (prev.offW || 0) + (prev.offB || 0);
+  const curOff = (cur.offW || 0) + (cur.offB || 0);
+  const prevBar = (prev.barW || 0) + (prev.barB || 0);
+  const curBar = (cur.barW || 0) + (cur.barB || 0);
+  if (curOff > prevOff) sfx.bearOff();
+  else if (curBar > prevBar) sfx.hit();
+  else if (pointsChanged(prev, cur)) sfx.move();
+}
+
+function pointsChanged(a, b) {
+  if (!a.points || !b.points) return false;
+  for (let i = 0; i < 24; i++) if (a.points[i] !== b.points[i]) return true;
+  return false;
+}
 
 // ---- left x of a board column (0..11), accounting for the central bar ----
 function colLeft(col) {
@@ -51,9 +227,11 @@ async function api(path, body) {
 async function refresh(next) {
   if (busy) return;
   busy = true;
+  const prev = state;
   try { state = await next; }
   finally { busy = false; }
   selected = null;
+  reactToTransition(prev, state);
   render();
   afterRender();
 }
@@ -62,8 +240,13 @@ async function refresh(next) {
 function afterRender() {
   if (aiTimer) { clearTimeout(aiTimer); aiTimer = null; }
   const undoBtn = document.getElementById("undo");
-  const canRoll = state && !state.over && !state.rolled && !state.aiTurn;
+  const choosingDoubles = !!(state && state.phase === "acey-choose");
+  const canRoll = state && !state.over && !state.rolled && !state.aiTurn && !choosingDoubles;
   undoBtn.disabled = !state || !state.canUndo;
+
+  // Acey Deucey: after a 1-2 the human picks any doubles before play continues.
+  document.getElementById("aceyChoose").hidden =
+    !(choosingDoubles && !state.aiTurn && !state.over);
 
   // Big centered blinking Roll button — only on a human's turn (never the computer).
   const rollCenter = document.getElementById("rollCenter");
@@ -76,7 +259,7 @@ function afterRender() {
   }
 
   if (state && state.aiTurn && !state.over) {
-    aiTimer = setTimeout(() => { refresh(api("api/ai", {})); }, 650);
+    aiTimer = setTimeout(() => { sfx.roll(); refresh(api("api/ai", {})); }, 650);
   }
 }
 
@@ -86,6 +269,7 @@ function afterRender() {
 function render() {
   ctx.clearRect(0, 0, CW, CH);
   if (!state) return;
+  drawWood();
   drawTrays();
   drawPoints();
   drawHighlights();
@@ -96,19 +280,40 @@ function render() {
   drawStatus();
 }
 
+// Wooden board: walnut field with faint grain and a framed border.
+function drawWood() {
+  const g = ctx.createLinearGradient(0, 0, 0, CH);
+  g.addColorStop(0, "#f6ecd4");
+  g.addColorStop(0.5, "#efe2c4");
+  g.addColorStop(1, "#e6d6b2");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, CW, CH);
+
+  // outer frame
+  ctx.strokeStyle = "#2e1d0e";
+  ctx.lineWidth = 10;
+  ctx.strokeRect(5, 5, CW - 10, CH - 10);
+  ctx.strokeStyle = "rgba(150,100,55,0.5)";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(11, 11, CW - 22, CH - 22);
+}
+
+// Vertical wood gradient used for the bar and the bear-off tray.
+function woodTray(x, y, w, h) {
+  const g = ctx.createLinearGradient(x, y, x, y + h);
+  g.addColorStop(0, "#c8975a");
+  g.addColorStop(0.5, "#ad7943");
+  g.addColorStop(1, "#946035");
+  ctx.fillStyle = g;
+  ctx.fillRect(x, y, w, h);
+  ctx.strokeStyle = "#cf9c64";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(x, y, w, h);
+}
+
 function drawTrays() {
-  // central bar
-  ctx.fillStyle = "#6b5644";
-  ctx.fillRect(barLeft, M, BW, CH - 2 * M);
-  ctx.strokeStyle = "#9b8064";
-  ctx.lineWidth = 2;
-  ctx.strokeRect(barLeft, M, BW, CH - 2 * M);
-  // bear-off tray
-  ctx.fillStyle = "#6b5644";
-  ctx.fillRect(offLeft, M, OW, CH - 2 * M);
-  ctx.strokeStyle = "#9b8064";
-  ctx.lineWidth = 2;
-  ctx.strokeRect(offLeft, M, OW, CH - 2 * M);
+  woodTray(barLeft, M, BW, CH - 2 * M);   // central bar
+  woodTray(offLeft, M, OW, CH - 2 * M);   // bear-off tray
 }
 
 function drawPoints() {
@@ -116,15 +321,22 @@ function drawPoints() {
     const { cx, top } = slotInfo(i);
     const baseY = top ? M : CH - M;
     const tipY = top ? M + PH : CH - M - PH;
+    const light = (i % 2 === 0);
+    const g = ctx.createLinearGradient(0, baseY, 0, tipY);
+    if (light) { g.addColorStop(0, "#fbecca"); g.addColorStop(1, "#ecc88e"); }
+    else { g.addColorStop(0, "#d6924a"); g.addColorStop(1, "#b5703a"); }
     ctx.beginPath();
     ctx.moveTo(cx - PW / 2 + 4, baseY);
     ctx.lineTo(cx + PW / 2 - 4, baseY);
     ctx.lineTo(cx, tipY);
     ctx.closePath();
-    ctx.fillStyle = (i % 2 === 0) ? POINT_LIGHT : POINT_DARK;
-    ctx.globalAlpha = 0.92;
+    ctx.fillStyle = g;
+    ctx.globalAlpha = 0.96;
     ctx.fill();
     ctx.globalAlpha = 1;
+    ctx.strokeStyle = "rgba(40,22,8,0.35)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
   }
 }
 
@@ -340,8 +552,12 @@ function drawStatus() {
   else if (state.mode === "human") who = `${side} to move`;
   turnEl.textContent = state.rolled ? `${who} — play your dice` : `${who} — roll`;
   noteEl.className = "note";
-  if (state.aiTurn) noteEl.textContent = "Computer is thinking…";
-  else noteEl.textContent = state.note || "";
+  if (state.aiTurn) {
+    // Keep a shut-out explanation visible even as control passes to the computer.
+    noteEl.textContent = /shut out/i.test(state.note || "") ? state.note : "Computer is thinking…";
+  } else {
+    noteEl.textContent = state.note || "";
+  }
 }
 
 function humanToMove() {
@@ -384,7 +600,7 @@ canvas.addEventListener("click", (ev) => {
     return;
   }
   if (hit.bar) {
-    if (froms.has(-1)) { selected = -1; render(); }
+    if (froms.has(-1)) { selected = -1; sfx.select(); render(); }
     else { selected = null; render(); }
     return;
   }
@@ -393,7 +609,7 @@ canvas.addEventListener("click", (ev) => {
     doMove(selected, i);
     return;
   }
-  if (froms.has(i)) { selected = i; render(); }
+  if (froms.has(i)) { selected = i; sfx.select(); render(); }
   else { selected = null; render(); }
 });
 
@@ -413,19 +629,71 @@ document.getElementById("undo").addEventListener("click", () => {
 function startNewGame() {
   const opponent = document.getElementById("opponent").value;
   const level = document.getElementById("level").value;
-  refresh(api("api/new", { opponent, level }));
+  refresh(api("api/new", { opponent, level, variant: currentVariant }));
 }
 document.getElementById("new").addEventListener("click", startNewGame);
 document.getElementById("winBtn").addEventListener("click", startNewGame);
 
-// Reflect server-side mode/level into the selectors after each load.
+// ---- Hamburger game-picker: Backgammon vs Acey Deucey ----
+const menuBtn = document.getElementById("menuBtn");
+const menuList = document.getElementById("menuList");
+function openMenu(open) {
+  menuList.hidden = !open;
+  menuBtn.setAttribute("aria-expanded", open ? "true" : "false");
+}
+menuBtn.addEventListener("click", (e) => { e.stopPropagation(); openMenu(menuList.hidden); });
+menuList.addEventListener("click", (e) => e.stopPropagation());
+document.addEventListener("click", () => openMenu(false));
+document.querySelectorAll(".menu-item").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    currentVariant = btn.dataset.variant;
+    openMenu(false);
+    startNewGame();
+  });
+});
+
+// ---- Acey Deucey doubles chooser ----
+document.querySelectorAll("#aceyChoose .acey-btns button").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    if (!busy) refresh(api("api/acey", { double: parseInt(btn.dataset.d, 10) }));
+  });
+});
+
+// Reflect server-side variant/mode/level into the UI after each load.
 function syncControls() {
   if (!state) return;
   document.getElementById("opponent").value = state.mode;
   document.getElementById("level").value = state.level;
+  currentVariant = state.variant || currentVariant;
+  const name = currentVariant === "acey" ? "Acey Deucey" : "Backgammon";
+  document.getElementById("gameTitle").textContent = name;
+  document.getElementById("menuCurrent").textContent = name;
+  document.title = `${name} — play online vs the computer | bozcode.com`;
+  document.querySelectorAll(".rules-body").forEach((el) => {
+    el.hidden = el.dataset.variant !== currentVariant;
+  });
+  document.querySelectorAll(".menu-item").forEach((el) => {
+    el.classList.toggle("active", el.dataset.variant === currentVariant);
+  });
 }
 const _render = render;
 render = function () { _render(); syncControls(); };
+
+// sound toggle + score reset
+const soundEl = document.getElementById("sound");
+soundEl.checked = soundOn;
+soundEl.addEventListener("change", () => {
+  soundOn = soundEl.checked;
+  localStorage.setItem("bg_sound", soundOn ? "on" : "off");
+  if (soundOn) { ensureAudio(); sfx.select(); }
+});
+document.getElementById("resetScore").addEventListener("click", () => {
+  scoreW = 0; scoreB = 0;
+  localStorage.setItem("bg_scoreW", "0");
+  localStorage.setItem("bg_scoreB", "0");
+  renderScore();
+});
+renderScore();
 
 // kick things off
 refresh(api("api/state"));

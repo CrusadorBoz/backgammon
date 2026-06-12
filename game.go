@@ -34,6 +34,14 @@ type pos struct {
 	barB int
 	offW int
 	offB int
+	// resvW/resvB count each side's Acey Deucey "opening reserve": checkers that
+	// started on the bar and have never entered. Entering the reserve is
+	// optional, so a player may move pieces already in play first. A checker
+	// knocked onto the bar by a hit is NOT reserve — it must be re-entered before
+	// any other move, exactly as in standard backgammon (see barLocked). Standard
+	// games leave these zero. Plain ints keep pos usable as a move-search map key.
+	resvW int
+	resvB int
 }
 
 // move is one checker hop, expressed as endpoints so the front-end never has to
@@ -60,6 +68,20 @@ func startPos() pos {
 	return p
 }
 
+// startPosAcey returns the Acey Deucey (Navy) opening: all fifteen checkers a
+// side start on the bar as opening reserve and are entered into the opponent's
+// home board. Entering the reserve is *not* forced — a player may move checkers
+// already in play before bringing the rest in. A checker later knocked off by a
+// hit, however, must be re-entered before any other move (see barLocked).
+func startPosAcey() pos {
+	var p pos
+	p.barW = 15
+	p.barB = 15
+	p.resvW = 15
+	p.resvB = 15
+	return p
+}
+
 func (p *pos) bar(pl int) int {
 	if pl == White {
 		return p.barW
@@ -73,6 +95,38 @@ func (p *pos) addBar(pl, n int) {
 	} else {
 		p.barB += n
 	}
+}
+
+// resv returns pl's Acey Deucey opening reserve still waiting on the bar.
+func (p *pos) resv(pl int) int {
+	if pl == White {
+		return p.resvW
+	}
+	return p.resvB
+}
+
+// clampResv keeps the reserve from exceeding the bar count after an entry, so a
+// checker entering reduces the reserve only once all knocked-off checkers (the
+// non-reserve part of the bar) are already back in.
+func (p *pos) clampResv(pl int) {
+	if pl == White {
+		if p.resvW > p.barW {
+			p.resvW = p.barW
+		}
+	} else {
+		if p.resvB > p.barB {
+			p.resvB = p.barB
+		}
+	}
+}
+
+// barLocked reports whether pl must enter from the bar before any other move. A
+// checker knocked off by a hit pushes the bar count above the opening reserve and
+// locks the bar exactly as in standard backgammon; the untouched opening reserve
+// does not. In a standard game the reserve is always zero, so any bar checker
+// locks the bar.
+func (p *pos) barLocked(pl int) bool {
+	return p.bar(pl) > p.resv(pl)
 }
 
 func (p *pos) off(pl int) int {
@@ -181,7 +235,7 @@ func (p *pos) destFor(pl, from, die int) (int, bool) {
 		}
 		return 0, false
 	}
-	if p.bar(pl) > 0 { // must clear the bar before moving anything else
+	if p.barLocked(pl) { // must re-enter knocked-off checkers before moving anything else
 		return 0, false
 	}
 	if !p.owns(pl, from) {
@@ -222,6 +276,7 @@ func (p *pos) apply(pl, from, die int) (int, bool) {
 	}
 	if from == BAR {
 		p.addBar(pl, -1)
+		p.clampResv(pl) // a knocked-off checker enters before any reserve does
 	} else {
 		p.pts[from] -= pl
 	}
@@ -255,7 +310,10 @@ func (p *pos) movesForDie(pl, die int) []move {
 		if to, ok := p.destFor(pl, BAR, die); ok {
 			ms = append(ms, move{BAR, to})
 		}
-		return ms
+		if p.barLocked(pl) {
+			return ms // must re-enter knocked-off checkers (or standard bar rule)
+		}
+		// Acey Deucey opening: entering the reserve is optional — also list board moves.
 	}
 	for i := 0; i < 24; i++ {
 		if !p.owns(pl, i) {
@@ -299,18 +357,27 @@ func maxUsable(p pos, pl int, dice []int) int {
 
 type Game struct {
 	pos
-	Turn   int    // White or Black
-	Dice   []int  // the full roll for the current turn (2, or 4 on doubles)
-	Rem    []int  // dice not yet consumed this turn
-	rolled bool   // have the dice been thrown for the current turn?
-	maxT   int    // max dice usable this turn, measured from the turn's start
-	used   int    // dice consumed so far this turn
-	Over   bool   // game finished?
-	Winner int    // White / Black once Over
-	Mode   string // "computer", "human" (hotseat), or "auto" (watch)
-	Level  string // "easy" / "medium" / "hard"
-	Note   string // transient status line for the UI
-	stack  []undoFrame
+	Turn    int    // White or Black
+	Dice    []int  // the full roll for the current turn (2, or 4 on doubles)
+	Rem     []int  // dice not yet consumed this turn
+	rolled  bool   // have the dice been thrown for the current turn?
+	maxT    int    // max dice usable this turn, measured from the turn's start
+	used    int    // dice consumed so far this turn
+	Over    bool   // game finished?
+	Winner  int    // White / Black once Over
+	Mode    string // "computer", "human" (hotseat), or "auto" (watch)
+	Level   string // "easy" / "medium" / "hard"
+	Variant string // "backgammon" or "acey" (Acey Deucey)
+	Note    string // transient status line for the UI
+	stack   []undoFrame
+
+	// Acey Deucey 1-2 special-roll state machine:
+	//   ""            normal play
+	//   "acey"        rolled 1-2; playing the 1 and the 2
+	//   "acey-choose" 1-2 played; waiting for the player to pick any doubles
+	//   "acey-double" playing the chosen doubles; same player rolls again after
+	special   string
+	aceyAgain bool // an Acey Deucey bonus re-roll is owed to the side on move
 }
 
 // undoFrame snapshots enough to roll back a single move within the current turn.
@@ -320,7 +387,7 @@ type undoFrame struct {
 	used   int
 }
 
-func newGameOpts(mode, level string) *Game {
+func newGameOpts(mode, level, variant string) *Game {
 	if mode != "human" && mode != "auto" {
 		mode = "computer"
 	}
@@ -329,7 +396,13 @@ func newGameOpts(mode, level string) *Game {
 	default:
 		level = "easy"
 	}
-	return &Game{pos: startPos(), Turn: White, Mode: mode, Level: level}
+	start := startPos()
+	if variant == "acey" {
+		start = startPosAcey()
+	} else {
+		variant = "backgammon"
+	}
+	return &Game{pos: start, Turn: White, Mode: mode, Level: level, Variant: variant}
 }
 
 // aiControls reports whether the given side is played by the computer.
@@ -355,12 +428,94 @@ func (g *Game) roll(d1, d2 int) {
 	g.used = 0
 	g.rolled = true
 	g.stack = nil
+	g.special = ""
+	// Acey Deucey: a 1-2 is the bonus roll. Play the 1 and 2, then choose any
+	// doubles, then roll again.
+	if g.Variant == "acey" && d1 != d2 && d1+d2 == 3 {
+		g.special = "acey"
+		g.aceyAgain = true
+	}
+	g.maxT = maxUsable(g.pos, g.Turn, g.Dice)
+	g.Note = ""
+	if g.special == "acey" {
+		g.Note = "Acey-deucey! Play the 1 and 2, then pick any doubles."
+	}
+	if g.maxT == 0 {
+		if g.special == "acey" {
+			// Can't play the 1-2 at all — still take the doubles + re-roll bonus.
+			g.advance()
+			return
+		}
+		if g.barLocked(g.Turn) {
+			// Knocked-off checker(s) with no open entry point — a shut-out.
+			g.Note = sideName(g.Turn) + " is shut out — no open point to enter from the bar; turn passes."
+		} else {
+			g.Note = "No legal move with that roll — turn passes."
+		}
+		g.endTurn()
+	}
+}
+
+// sideName is the display name for a player, used in status notes.
+func sideName(pl int) string {
+	if pl == White {
+		return "White"
+	}
+	return "Black"
+}
+
+// advance is called when the current dice are exhausted (or unplayable). For an
+// ordinary turn it just hands over to the opponent; during an Acey Deucey bonus
+// it steps the 1-2 → choose-doubles → re-roll state machine, keeping the turn
+// with the same player until the bonus is fully spent.
+func (g *Game) advance() {
+	switch g.special {
+	case "acey":
+		// Finished the 1-2; pause for the doubles choice (same player).
+		g.special = "acey-choose"
+		g.Dice = nil
+		g.Rem = nil
+		g.rolled = false
+		g.used = 0
+		g.maxT = 0
+		g.stack = nil
+		g.Note = "Acey-deucey! Choose any doubles to play."
+		return
+	case "acey-double":
+		// Finished the chosen doubles; the same player rolls again.
+		g.special = ""
+		g.aceyAgain = false
+		g.Dice = nil
+		g.Rem = nil
+		g.rolled = false
+		g.used = 0
+		g.maxT = 0
+		g.stack = nil
+		g.Note = "Acey-deucey bonus — roll again."
+		return
+	}
+	g.endTurn()
+}
+
+// chooseDoubles is the Acey Deucey step where the player picks any doubles (1-6)
+// to play after the 1-2. It loads those four dice and lets normal play proceed;
+// if none of them can be played the bonus moves straight on to the re-roll.
+func (g *Game) chooseDoubles(d int) bool {
+	if g.special != "acey-choose" || d < 1 || d > 6 {
+		return false
+	}
+	g.Dice = []int{d, d, d, d}
+	g.Rem = append([]int(nil), g.Dice...)
+	g.used = 0
+	g.rolled = true
+	g.stack = nil
+	g.special = "acey-double"
 	g.maxT = maxUsable(g.pos, g.Turn, g.Dice)
 	g.Note = ""
 	if g.maxT == 0 {
-		g.Note = "No legal move with that roll — turn passes."
-		g.endTurn()
+		g.advance() // nothing to play with these doubles — on to the re-roll
 	}
+	return true
 }
 
 // legalNow lists the moves the side to move may make right now, already filtered
@@ -470,10 +625,10 @@ func (g *Game) Move(from, to int) bool {
 		return true
 	}
 	if len(g.Rem) == 0 || len(g.legalNow()) == 0 {
-		if len(g.Rem) > 0 && g.Note == "" {
+		if g.special == "" && len(g.Rem) > 0 && g.Note == "" {
 			g.Note = "No further legal move — turn passes."
 		}
-		g.endTurn()
+		g.advance()
 	}
 	return true
 }
@@ -502,6 +657,8 @@ func (g *Game) endTurn() {
 	g.used = 0
 	g.maxT = 0
 	g.stack = nil
+	g.special = ""
+	g.aceyAgain = false
 }
 
 // result classifies a finished game for display (single / gammon / backgammon).

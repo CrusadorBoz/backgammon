@@ -40,6 +40,55 @@ body {
   letter-spacing: 0.5px;
 }
 
+/* hamburger game-picker (Backgammon / Acey Deucey) */
+.menu { position: relative; }
+.menu-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  background: var(--panel2);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 7px 13px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background .15s ease;
+}
+.menu-btn:hover { background: #4a3a2e; }
+.menu-icon { font-size: 19px; }
+.menu-current { font-size: 15px; font-weight: 600; }
+.menu-list {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 20;
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  min-width: 168px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 12px 30px rgba(0,0,0,.4);
+}
+.menu-list[hidden] { display: none; }
+.menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  border-radius: 7px;
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 600;
+  padding: 9px 12px;
+  cursor: pointer;
+}
+.menu-item:hover { background: var(--panel2); }
+.menu-item.active { background: var(--accent); color: #fff8ef; }
+
 .home {
   display: inline-block;
   text-decoration: none;
@@ -115,12 +164,49 @@ select {
   100% { box-shadow: 0 0 0 0 rgba(181,121,63,0); }
 }
 
+.snd {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--page-muted);
+  cursor: pointer;
+  user-select: none;
+}
+.snd input { accent-color: var(--accent); cursor: pointer; }
+
+.scorebar {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin: 4px 2px 0;
+  padding: 8px 14px;
+  background: rgba(43, 33, 27, 0.55);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  font-size: 14px;
+  color: var(--ink);
+}
+.scorebar .sc { font-weight: 600; }
+.scorebar .sc b { font-weight: 800; }
+.link-btn {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: var(--page-muted);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 2px 4px;
+  text-decoration: underline;
+}
+.link-btn:hover { color: var(--ink); }
+
 .status {
   display: flex;
   align-items: center;
   gap: 14px;
   min-height: 26px;
-  margin: 6px 2px 10px;
+  margin: 10px 2px;
 }
 .turn { font-weight: 700; font-size: 15px; }
 .note { color: var(--accent2); font-size: 14px; }
@@ -143,7 +229,52 @@ select {
 .win-btn:hover { background: #f0f0f4; }
 .win-btn:active { transform: translateY(1px); }
 
+/* Acey Deucey: pick any doubles after a 1-2 */
+.acey-choose {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin: 0 2px 10px;
+  padding: 12px 14px;
+  background: rgba(43, 33, 27, 0.6);
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+}
+.acey-choose[hidden] { display: none; }
+.acey-label { color: #ffd166; font-weight: 700; font-size: 14px; }
+.acey-btns { display: flex; flex-wrap: wrap; gap: 8px; }
+.acey-btns button {
+  background: var(--panel2);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background .15s ease, transform .05s ease;
+}
+.acey-btns button:hover { background: var(--accent); color: #fff8ef; }
+.acey-btns button:active { transform: translateY(1px); }
+
 .board-wrap { position: relative; }
+
+/* Transparent confetti overlay for the win celebration. Overrides the generic
+   canvas styling (which has a dark background, border and shadow). */
+.confetti {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 6;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  border-radius: 14px;
+}
 
 canvas {
   width: 100%;
@@ -202,16 +333,43 @@ canvas {
 .dot.white { background: #f1ead4; border: 1px solid #b8b08e; }
 .dot.black { background: #2a2a33; border: 1px solid #6b6b80; }
 
+/* Instructions: a collapsible dropdown with a darker header over a cream body */
 .rules {
   margin-top: 30px;
-  padding: 18px 20px;
-  background: var(--panel);
-  border: 1px solid var(--line);
+  background: #f6ecd4;            /* same cream as the board field */
+  border: 1px solid #d8c39a;
   border-radius: 12px;
+  overflow: hidden;              /* keep the header inside the rounded corners */
 }
-.rules h2 { margin: 0 0 8px; font-size: 17px; }
-.rules p { margin: 0; color: var(--muted); line-height: 1.55; font-size: 14px; }
-.rules b { color: var(--ink); }
+.rules-summary {
+  list-style: none;              /* drop the default disclosure triangle */
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 13px 20px;
+  font-size: 17px;
+  font-weight: 700;
+  color: #2f2418;                /* darker than the body text */
+  background: #e7d4a9;           /* a little darker than the cream body */
+  border-bottom: 1px solid #d2bb85; /* separation from the instructions */
+}
+.rules-summary::-webkit-details-marker { display: none; }
+.rules-summary::after {
+  content: "\25B8";              /* ▸ chevron, rotates open */
+  font-size: 14px;
+  color: #6b5836;
+  transition: transform .15s ease;
+}
+details[open] .rules-summary::after { transform: rotate(90deg); }
+.rules-summary:hover { background: #ddc99a; }
+
+.rules-body { padding: 16px 20px; }
+.rules-body[hidden] { display: none; }
+.rules p { margin: 0 0 10px; color: #4a3a2e; line-height: 1.55; font-size: 14px; }
+.rules p:last-child { margin-bottom: 0; }
+.rules b, .rules i { color: #2f2418; }
 
 @media (max-width: 560px) {
   .topbar h1 { font-size: 23px; }

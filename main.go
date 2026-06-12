@@ -56,6 +56,7 @@ func main() {
 	mux.HandleFunc("/api/roll", st.handleRoll)
 	mux.HandleFunc("/api/move", st.handleMove)
 	mux.HandleFunc("/api/undo", st.handleUndo)
+	mux.HandleFunc("/api/acey", st.handleAcey)
 	mux.HandleFunc("/api/ai", st.handleAI)
 
 	addr := listenAddr()
@@ -97,7 +98,7 @@ func (s *store) with(id string, fn func(g *Game)) {
 	defer s.mu.Unlock()
 	g := s.games[id]
 	if g == nil {
-		g = newGameOpts("computer", "easy")
+		g = newGameOpts("computer", "easy", "backgammon")
 		s.games[id] = g
 	}
 	fn(g)
@@ -112,37 +113,53 @@ func (s *store) reset(id string, g *Game) {
 // d6 returns a fair die roll.
 func (s *store) d6() int { return s.rng.Intn(6) + 1 }
 
-// aiTurn plays one complete computer turn (roll + all moves) if it is the
-// computer's move. Must be called with the store lock held.
+// aiTurn plays one complete computer possession (roll + all moves) if it is the
+// computer's move. An Acey Deucey 1-2 bonus — play the 1-2, choose doubles, roll
+// again — is resolved within this single call, but the turn is never carried on
+// past the hand-over to the other side, so "watch the computer" still alternates
+// one side per /api/ai poll. Must be called with the store lock held.
 func (s *store) aiTurn(g *Game) {
 	if g.Over || !g.aiControls(g.Turn) {
 		return
 	}
-	if !g.rolled {
-		g.roll(s.d6(), s.d6())
-	}
-	if g.Over || !g.rolled { // roll may have auto-passed an unplayable turn
-		return
-	}
-	allowed := g.legalNow()
-	for _, m := range bestPlay(g.pos, g.Turn, g.Dice, g.Level, s.rng, allowed) {
-		if !g.Move(m.From, m.To) || g.Over {
+	side := g.Turn
+	for !g.Over && g.Turn == side && g.aiControls(side) {
+		if g.special == "acey-choose" {
+			g.chooseDoubles(bestDouble(g, s.rng))
+			continue
+		}
+		if !g.rolled {
+			g.roll(s.d6(), s.d6())
+		}
+		if g.Over || g.Turn != side { // roll may have auto-passed an unplayable turn
 			break
 		}
-	}
-	// Safety net: never leave the computer's turn half-played. If anything
-	// remains legal, finish it greedily so the turn always ends.
-	for !g.Over {
-		legal := g.legalNow()
-		if len(legal) == 0 {
+		if !g.rolled { // advanced to a non-rolled bonus phase (e.g. choose doubles)
+			if g.special == "acey-choose" {
+				continue
+			}
 			break
 		}
-		if !g.Move(legal[0].From, legal[0].To) {
-			break
+		allowed := g.legalNow()
+		for _, m := range bestPlay(g.pos, g.Turn, g.Dice, g.Level, s.rng, allowed) {
+			if !g.Move(m.From, m.To) || g.Over {
+				break
+			}
 		}
-	}
-	if g.rolled && !g.Over {
-		g.endTurn()
+		// Safety net: never leave the computer's turn half-played. If anything
+		// remains legal, finish it greedily so the turn always ends.
+		for !g.Over {
+			legal := g.legalNow()
+			if len(legal) == 0 {
+				break
+			}
+			if !g.Move(legal[0].From, legal[0].To) {
+				break
+			}
+		}
+		if g.rolled && !g.Over { // dice left unspent (e.g. fully blocked) — advance
+			g.advance()
+		}
 	}
 }
 
@@ -165,10 +182,11 @@ func (s *store) handleNew(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Opponent string `json:"opponent"`
 		Level    string `json:"level"`
+		Variant  string `json:"variant"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&body)
 	id := sessionID(w, r)
-	s.reset(id, newGameOpts(body.Opponent, body.Level))
+	s.reset(id, newGameOpts(body.Opponent, body.Level, body.Variant))
 	var out stateDTO
 	s.with(id, func(g *Game) { out = dto(g) })
 	writeJSON(w, out)
@@ -182,9 +200,34 @@ func (s *store) handleRoll(w http.ResponseWriter, r *http.Request) {
 	id := sessionID(w, r)
 	var out stateDTO
 	s.with(id, func(g *Game) {
-		// Humans roll for their own side; the computer rolls via /api/ai.
-		if !g.Over && !g.rolled && !g.aiControls(g.Turn) {
+		// Humans roll for their own side; the computer rolls via /api/ai. During
+		// the Acey Deucey doubles-choice pause there is nothing to roll.
+		if !g.Over && !g.rolled && g.special != "acey-choose" && !g.aiControls(g.Turn) {
 			g.roll(s.d6(), s.d6())
+		}
+		out = dto(g)
+	})
+	writeJSON(w, out)
+}
+
+// handleAcey records the player's chosen doubles for an Acey Deucey 1-2 bonus.
+func (s *store) handleAcey(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST only", http.StatusMethodNotAllowed)
+		return
+	}
+	var body struct {
+		Double int `json:"double"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	id := sessionID(w, r)
+	var out stateDTO
+	s.with(id, func(g *Game) {
+		if !g.Over && !g.aiControls(g.Turn) {
+			g.chooseDoubles(body.Double)
 		}
 		out = dto(g)
 	})
@@ -274,6 +317,8 @@ type stateDTO struct {
 	Result  string `json:"result,omitempty"`
 	Mode    string `json:"mode"`
 	Level   string `json:"level"`
+	Variant string `json:"variant"`
+	Phase   string `json:"phase,omitempty"`
 	Note    string `json:"note,omitempty"`
 	CanUndo bool   `json:"canUndo"`
 	AITurn  bool   `json:"aiTurn"`
@@ -302,6 +347,8 @@ func dto(g *Game) stateDTO {
 		Result:  g.result(),
 		Mode:    g.Mode,
 		Level:   g.Level,
+		Variant: g.Variant,
+		Phase:   g.special,
 		Note:    g.Note,
 		CanUndo: g.canUndo(),
 		AITurn:  !g.Over && g.aiControls(g.Turn),

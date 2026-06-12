@@ -12,12 +12,19 @@
   <meta property="og:description" content="Play backgammon vs the computer or a friend, right in your browser.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://bozcode.com/goapp/backgammon/">
-  <link rel="stylesheet" href="styles.css?v=6">
+  <link rel="stylesheet" href="styles.css?v=11">
 </head>
 <body>
   <main class="wrap">
     <header class="topbar">
-      <h1>Backgammon</h1>
+      <div class="menu">
+        <button id="menuBtn" class="menu-btn" type="button" aria-label="Choose game" aria-haspopup="true" aria-expanded="false"><span class="menu-icon">&#9776;</span><span id="menuCurrent" class="menu-current">Backgammon</span></button>
+        <ul id="menuList" class="menu-list" role="menu" hidden>
+          <li><button class="menu-item active" type="button" role="menuitem" data-variant="backgammon">Backgammon</button></li>
+          <li><button class="menu-item" type="button" role="menuitem" data-variant="acey">Acey Deucey</button></li>
+        </ul>
+      </div>
+      <h1 id="gameTitle">Backgammon</h1>
       <a class="home" href="/">&#8592; bozcode.com</a>
     </header>
 
@@ -38,6 +45,13 @@
       </label>
       <button id="new" class="btn">New game</button>
       <button id="undo" class="btn">Undo</button>
+      <label class="snd"><input type="checkbox" id="sound"> Sound</label>
+    </section>
+
+    <section class="scorebar">
+      <span class="sc"><b class="dot white"></b> White <b id="scoreW">0</b></span>
+      <span class="sc"><b class="dot black"></b> Black <b id="scoreB">0</b></span>
+      <button id="resetScore" class="link-btn" type="button">Reset</button>
     </section>
 
     <div class="status">
@@ -46,8 +60,21 @@
       <button id="winBtn" class="win-btn" type="button"></button>
     </div>
 
+    <div id="aceyChoose" class="acey-choose" hidden>
+      <span class="acey-label">Acey-deucey! Choose your doubles:</span>
+      <div class="acey-btns">
+        <button type="button" data-d="1">1-1</button>
+        <button type="button" data-d="2">2-2</button>
+        <button type="button" data-d="3">3-3</button>
+        <button type="button" data-d="4">4-4</button>
+        <button type="button" data-d="5">5-5</button>
+        <button type="button" data-d="6">6-6</button>
+      </div>
+    </div>
+
     <div class="board-wrap">
       <canvas id="board" width="874" height="556" aria-label="Backgammon board"></canvas>
+      <canvas id="confetti" class="confetti" width="874" height="556" aria-hidden="true"></canvas>
       <button id="rollCenter" class="roll-center" type="button">Roll</button>
     </div>
 
@@ -56,11 +83,19 @@
       <span class="pip"><b class="dot black"></b> Black pip: <span id="pipB">167</span></span>
     </div>
 
-    <section class="rules">
-      <h2>How to play</h2>
-      <p>White moves toward the bottom-right home and bears off there; Black moves toward the top-right home. Click <b>Roll</b>, then click one of your checkers — the legal landing points light up — and click where to send it. A double rolls four moves. Land on a lone enemy checker to send it to the bar; a player on the bar must re-enter first. Once all fifteen of your checkers are home, you bear them off — first side off all fifteen wins (a <i>gammon</i> or <i>backgammon</i> scores extra).</p>
-    </section>
+    <details class="rules">
+      <summary class="rules-summary"><span id="rulesTitle">How to play</span></summary>
+      <div class="rules-body" data-variant="backgammon">
+        <p>White moves toward the bottom-right home and bears off there; Black moves toward the top-right home. Click <b>Roll</b>, then click one of your checkers — the legal landing points light up — and click where to send it. A double rolls four moves. Land on a lone enemy checker to send it to the bar; a player on the bar must re-enter first. Once all fifteen of your checkers are home, you bear them off — first side off all fifteen wins (a <i>gammon</i> or <i>backgammon</i> scores extra).</p>
+      </div>
+      <div class="rules-body" data-variant="acey" hidden>
+        <p><b>Acey Deucey</b> is the Navy/Merchant-Marine cousin of backgammon. All fifteen of your checkers start <b>off the board, on the bar</b>, and you bring them into your opponent's home board to get going. You <b>don't</b> have to enter them all first — on any turn you may <b>either enter a checker from the bar or move one that's already in play</b>, whichever you like. Click <b>Roll</b>, then click the bar (or any checker of yours) and a lit landing point.</p>
+        <p>Watch out for hits: if one of your checkers is <b>knocked onto the bar</b>, you must bring <b>every</b> knocked-off checker back into your opponent's home board — the first six points — before you may make any other move. The opening reserve is forgiving, but a knocked-off checker is not. If your opponent has filled all six of those entry points with two or more checkers, your checker is <b>shut out</b> until a point opens — so a solid home board late in the game is brutal, since a trapped checker must travel all the way around again.</p>
+        <p>Once all your checkers are home with none on the bar, you bear them off. First side to bear off all fifteen wins; a <i>gammon</i> or <i>backgammon</i> scores extra.</p>
+        <p>The signature rule is the <b>acey-deucey roll</b>: whenever you roll a <b>1 and a 2</b>, first play the 1 and the 2, then <b>choose any doubles you like</b> (1-1 through 6-6) and play all four of them, and then <b>roll again</b> for a bonus turn. If a 1-2 can't be fully played you still get the doubles and the re-roll.</p>
+      </div>
+    </details>
   </main>
-  <script src="app.js?v=5"></script>
+  <script src="app.js?v=15"></script>
 </body>
 </html>
