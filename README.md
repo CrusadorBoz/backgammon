@@ -6,6 +6,8 @@ JSON API backed by a complete rules engine — bar entry, hitting, bearing off, 
 backgammon scoring. Play against the computer (easy / medium / hard), against a
 friend on the same screen, or sit back and watch the computer play itself.
 
+**▶ Play it live: [bozcode.com/goapp/backgammon](https://bozcode.com/goapp/backgammon/)**
+
 ## Layout
 
 | File          | Purpose                                                        |
