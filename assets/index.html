@@ -12,7 +12,7 @@
   <meta property="og:description" content="Play backgammon vs the computer or a friend, right in your browser.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://bozcode.com/goapp/backgammon/">
-  <link rel="stylesheet" href="styles.css?v=1">
+  <link rel="stylesheet" href="styles.css?v=6">
 </head>
 <body>
   <main class="wrap">
@@ -31,22 +31,25 @@
       </label>
       <label>Level
         <select id="level">
-          <option value="easy">Easy</option>
-          <option value="medium" selected>Medium</option>
+          <option value="easy" selected>Easy</option>
+          <option value="medium">Medium</option>
           <option value="hard">Hard</option>
         </select>
       </label>
       <button id="new" class="btn">New game</button>
-      <button id="roll" class="btn primary">Roll</button>
       <button id="undo" class="btn">Undo</button>
     </section>
 
     <div class="status">
       <span id="turn" class="turn"></span>
       <span id="note" class="note"></span>
+      <button id="winBtn" class="win-btn" type="button"></button>
     </div>
 
-    <canvas id="board" width="874" height="556" aria-label="Backgammon board"></canvas>
+    <div class="board-wrap">
+      <canvas id="board" width="874" height="556" aria-label="Backgammon board"></canvas>
+      <button id="rollCenter" class="roll-center" type="button">Roll</button>
+    </div>
 
     <div class="meta">
       <span class="pip"><b class="dot white"></b> White pip: <span id="pipW">167</span></span>
@@ -58,6 +61,6 @@
       <p>White moves toward the bottom-right home and bears off there; Black moves toward the top-right home. Click <b>Roll</b>, then click one of your checkers — the legal landing points light up — and click where to send it. A double rolls four moves. Land on a lone enemy checker to send it to the bar; a player on the bar must re-enter first. Once all fifteen of your checkers are home, you bear them off — first side off all fifteen wins (a <i>gammon</i> or <i>backgammon</i> scores extra).</p>
     </section>
   </main>
-  <script src="app.js?v=1"></script>
+  <script src="app.js?v=5"></script>
 </body>
 </html>

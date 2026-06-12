@@ -61,12 +61,19 @@ async function refresh(next) {
 // After every state change: drive the computer, update buttons.
 function afterRender() {
   if (aiTimer) { clearTimeout(aiTimer); aiTimer = null; }
-  const rollBtn = document.getElementById("roll");
   const undoBtn = document.getElementById("undo");
   const canRoll = state && !state.over && !state.rolled && !state.aiTurn;
-  rollBtn.disabled = !canRoll;
-  rollBtn.classList.toggle("glow", !!canRoll);
   undoBtn.disabled = !state || !state.canUndo;
+
+  // Big centered blinking Roll button — only on a human's turn (never the computer).
+  const rollCenter = document.getElementById("rollCenter");
+  if (canRoll) {
+    const side = state.turn > 0 ? "White" : "Black";
+    rollCenter.textContent = `${side} — Roll`;
+    rollCenter.classList.add("show");
+  } else {
+    rollCenter.classList.remove("show");
+  }
 
   if (state && state.aiTurn && !state.over) {
     aiTimer = setTimeout(() => { refresh(api("api/ai", {})); }, 650);
@@ -91,13 +98,16 @@ function render() {
 
 function drawTrays() {
   // central bar
-  ctx.fillStyle = "#0e1426";
+  ctx.fillStyle = "#6b5644";
   ctx.fillRect(barLeft, M, BW, CH - 2 * M);
+  ctx.strokeStyle = "#9b8064";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(barLeft, M, BW, CH - 2 * M);
   // bear-off tray
-  ctx.fillStyle = "#0e1426";
+  ctx.fillStyle = "#6b5644";
   ctx.fillRect(offLeft, M, OW, CH - 2 * M);
-  ctx.strokeStyle = "#2a3457";
-  ctx.lineWidth = 1;
+  ctx.strokeStyle = "#9b8064";
+  ctx.lineWidth = 2;
   ctx.strokeRect(offLeft, M, OW, CH - 2 * M);
 }
 
@@ -312,13 +322,18 @@ function drawStatus() {
   document.getElementById("pipW").textContent = state.pipW;
   document.getElementById("pipB").textContent = state.pipB;
 
+  const winBtn = document.getElementById("winBtn");
   if (state.over) {
     const who = state.winner > 0 ? "White" : "Black";
-    turnEl.textContent = "Game over";
-    noteEl.textContent = `${who} wins — ${state.result || ""}`.trim();
-    noteEl.className = "note win";
+    const result = state.result ? ` — ${state.result}` : "";
+    turnEl.textContent = "";
+    noteEl.textContent = "";
+    noteEl.className = "note";
+    winBtn.textContent = `${who} wins${result} · New game`;
+    winBtn.classList.add("show");
     return;
   }
+  winBtn.classList.remove("show");
   const side = state.turn > 0 ? "White" : "Black";
   let who = side;
   if (state.aiTurn) who = `${side} (computer)`;
@@ -389,17 +404,19 @@ function doMove(from, to) {
 // =====================================================================
 // Controls
 // =====================================================================
-document.getElementById("roll").addEventListener("click", () => {
+document.getElementById("rollCenter").addEventListener("click", () => {
   if (!busy) refresh(api("api/roll", {}));
 });
 document.getElementById("undo").addEventListener("click", () => {
   if (!busy) refresh(api("api/undo", {}));
 });
-document.getElementById("new").addEventListener("click", () => {
+function startNewGame() {
   const opponent = document.getElementById("opponent").value;
   const level = document.getElementById("level").value;
   refresh(api("api/new", { opponent, level }));
-});
+}
+document.getElementById("new").addEventListener("click", startNewGame);
+document.getElementById("winBtn").addEventListener("click", startNewGame);
 
 // Reflect server-side mode/level into the selectors after each load.
 function syncControls() {

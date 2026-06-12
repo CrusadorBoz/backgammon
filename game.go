@@ -327,7 +327,7 @@ func newGameOpts(mode, level string) *Game {
 	switch level {
 	case "easy", "medium", "hard":
 	default:
-		level = "medium"
+		level = "easy"
 	}
 	return &Game{pos: startPos(), Turn: White, Mode: mode, Level: level}
 }

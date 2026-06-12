@@ -97,7 +97,7 @@ func (s *store) with(id string, fn func(g *Game)) {
 	defer s.mu.Unlock()
 	g := s.games[id]
 	if g == nil {
-		g = newGameOpts("computer", "medium")
+		g = newGameOpts("computer", "easy")
 		s.games[id] = g
 	}
 	fn(g)
