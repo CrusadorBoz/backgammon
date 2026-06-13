@@ -122,44 +122,43 @@ func (s *store) aiTurn(g *Game) {
 	if g.Over || !g.aiControls(g.Turn) {
 		return
 	}
-	side := g.Turn
-	for !g.Over && g.Turn == side && g.aiControls(side) {
-		if g.special == "acey-choose" {
-			g.chooseDoubles(bestDouble(g, s.rng))
-			continue
-		}
-		if !g.rolled {
-			g.roll(s.d6(), s.d6())
-		}
-		if g.Over || g.Turn != side { // roll may have auto-passed an unplayable turn
+	// One /api/ai poll performs a single *visible* step so the client can show
+	// the computer's roll on screen before it moves:
+	//   • acey-choose  → pick the bonus doubles (instant)
+	//   • not rolled   → roll the dice, then return so the dice are displayed
+	//   • rolled       → play the dice that the player has now seen
+	// The client keeps polling while it stays the computer's turn, so a full
+	// possession (including any Acey Deucey bonus) still completes — just spread
+	// across polls instead of collapsed into one.
+	if g.special == "acey-choose" {
+		g.chooseDoubles(bestDouble(g, s.rng))
+		return
+	}
+	if !g.rolled {
+		// roll() may itself auto-pass an unplayable turn or open a bonus phase.
+		g.roll(s.d6(), s.d6())
+		return
+	}
+
+	allowed := g.legalNow()
+	for _, m := range bestPlay(g.pos, g.Turn, g.Dice, g.Level, s.rng, allowed) {
+		if !g.Move(m.From, m.To) || g.Over {
 			break
 		}
-		if !g.rolled { // advanced to a non-rolled bonus phase (e.g. choose doubles)
-			if g.special == "acey-choose" {
-				continue
-			}
+	}
+	// Safety net: never leave the computer's turn half-played. If anything
+	// remains legal, finish it greedily so the turn always ends.
+	for !g.Over {
+		legal := g.legalNow()
+		if len(legal) == 0 {
 			break
 		}
-		allowed := g.legalNow()
-		for _, m := range bestPlay(g.pos, g.Turn, g.Dice, g.Level, s.rng, allowed) {
-			if !g.Move(m.From, m.To) || g.Over {
-				break
-			}
+		if !g.Move(legal[0].From, legal[0].To) {
+			break
 		}
-		// Safety net: never leave the computer's turn half-played. If anything
-		// remains legal, finish it greedily so the turn always ends.
-		for !g.Over {
-			legal := g.legalNow()
-			if len(legal) == 0 {
-				break
-			}
-			if !g.Move(legal[0].From, legal[0].To) {
-				break
-			}
-		}
-		if g.rolled && !g.Over { // dice left unspent (e.g. fully blocked) — advance
-			g.advance()
-		}
+	}
+	if g.rolled && !g.Over { // dice left unspent (e.g. fully blocked) — advance
+		g.advance()
 	}
 }
 

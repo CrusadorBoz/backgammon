@@ -259,7 +259,15 @@ function afterRender() {
   }
 
   if (state && state.aiTurn && !state.over) {
-    aiTimer = setTimeout(() => { sfx.roll(); refresh(api("api/ai", {})); }, 650);
+    if (!state.rolled) {
+      // Computer is about to roll: play the sound, then roll and show the dice.
+      aiTimer = setTimeout(() => { sfx.roll(); refresh(api("api/ai", {})); }, 650);
+    } else {
+      // The computer's dice are now on the board — pause long enough to read
+      // them (the Roll button stays hidden on the computer's turn) before it
+      // plays them.
+      aiTimer = setTimeout(() => { refresh(api("api/ai", {})); }, 1300);
+    }
   }
 }
 
