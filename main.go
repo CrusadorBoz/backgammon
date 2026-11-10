@@ -45,6 +45,7 @@ var assets embed.FS
 
 func main() {
 	st := newStore()
+	go st.sweepEvery(sweepInterval)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", handleIndex)
 	mux.HandleFunc("/styles.css", serveAsset("assets/styles.css", "text/css; charset=utf-8"))
@@ -71,12 +72,14 @@ func main() {
 type store struct {
 	mu    sync.Mutex
 	games map[string]*Game
+	seen  map[string]time.Time // last use of each game (sessions.go)
 	rng   *mrand.Rand
 }
 
 func newStore() *store {
 	return &store{
 		games: map[string]*Game{},
+		seen:  map[string]time.Time{},
 		rng:   mrand.New(mrand.NewSource(seed())),
 	}
 }
@@ -96,10 +99,10 @@ func seed() int64 {
 func (s *store) with(id string, fn func(g *Game)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	g := s.games[id]
+	g := s.getLocked(id)
 	if g == nil {
 		g = newGameOpts("computer", "easy", "backgammon")
-		s.games[id] = g
+		s.putLocked(id, g)
 	}
 	fn(g)
 }
@@ -107,7 +110,7 @@ func (s *store) with(id string, fn func(g *Game)) {
 func (s *store) reset(id string, g *Game) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.games[id] = g
+	s.putLocked(id, g)
 }
 
 // d6 returns a fair die roll.
@@ -377,7 +380,7 @@ func serveAsset(key, mime string) http.HandlerFunc {
 
 // sessionID reads the session cookie or mints a new one (set on the response).
 func sessionID(w http.ResponseWriter, r *http.Request) string {
-	if c, err := r.Cookie(cookieName); err == nil && c.Value != "" {
+	if c, err := r.Cookie(cookieName); err == nil && validSessionID(c.Value) {
 		return c.Value
 	}
 	b := make([]byte, 16)
