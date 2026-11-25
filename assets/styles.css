@@ -87,7 +87,7 @@ body {
   cursor: pointer;
 }
 .menu-item:hover { background: var(--panel2); }
-.menu-item.active { background: var(--accent); color: #fff8ef; }
+.menu-item.active { background: #8f5d2c; color: #fff8ef; }
 
 .home {
   display: inline-block;
@@ -255,7 +255,7 @@ select {
   cursor: pointer;
   transition: background .15s ease, transform .05s ease;
 }
-.acey-btns button:hover { background: var(--accent); color: #fff8ef; }
+.acey-btns button:hover { background: #8f5d2c; color: #fff8ef; }
 .acey-btns button:active { transform: translateY(1px); }
 
 .board-wrap { position: relative; }
@@ -372,7 +372,9 @@ details[open] .rules-summary::after { transform: rotate(90deg); }
 .rules b, .rules i { color: #2f2418; }
 
 @media (max-width: 560px) {
-  .topbar h1 { font-size: 23px; }
+  /* menu + Back on the first row, the title under them */
+  .topbar { flex-wrap: wrap; }
+  .topbar h1 { font-size: 23px; order: 1; flex-basis: 100%; }
   .controls { gap: 8px; }
   .btn { padding: 8px 12px; }
 }
